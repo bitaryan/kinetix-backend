@@ -6,6 +6,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.v1.endpoints.attendance import admin_router as admin_router
+from app.api.v1.endpoints.attendance import router as attendance_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.core.config import get_settings
 from app.core.database import engine
@@ -64,3 +66,5 @@ async def health() -> dict[str, str]:
 
 
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
+app.include_router(attendance_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_router, prefix=settings.api_v1_prefix)

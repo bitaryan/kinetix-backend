@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.attendance import AttendanceSession
     from app.models.session import ActiveSession
 
 
@@ -44,5 +45,8 @@ class User(Base):
     )
 
     sessions: Mapped[list["ActiveSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    attendance_sessions: Mapped[list["AttendanceSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )

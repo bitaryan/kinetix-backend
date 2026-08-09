@@ -1,9 +1,7 @@
-"""Shared pytest fixtures for API and security tests."""
-
-from __future__ import annotations
-
 import os
+import shutil
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 
 # Force deterministic test settings before any app module imports Settings.
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://gpss:gpss@localhost:5432/gpss"
@@ -16,7 +14,16 @@ os.environ["COOKIE_SAMESITE"] = "strict"
 os.environ["BACKEND_CORS_ORIGINS"] = "http://localhost:3000"
 os.environ["LOGIN_RATE_LIMIT_PER_MINUTE"] = "1000"
 os.environ["REFRESH_RATE_LIMIT_PER_MINUTE"] = "1000"
+os.environ["LOCATION_PING_RATE_LIMIT_PER_MINUTE"] = "1000"
+os.environ["LOCATION_PING_MIN_INTERVAL_SECONDS"] = "0"
+os.environ["LOCATION_PING_MAX_PER_SESSION"] = "6000"
+os.environ["LOCATION_PING_BATCH_MAX"] = "120"
 os.environ["TRUSTED_PROXY_IPS"] = ""
+os.environ["UPLOAD_DIR"] = "uploads/test"
+os.environ["MAX_UPLOAD_BYTES"] = "5242880"
+os.environ["DB_POOL_SIZE"] = "5"
+os.environ["DB_MAX_OVERFLOW"] = "10"
+os.environ["DB_POOL_TIMEOUT_SECONDS"] = "30"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,11 +35,13 @@ from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.main import app
 from app.models.user import User, UserRole
+from app.modules.attendance.location_mode_cache import clear_cached_location_mode
 from app.modules.auth.schemas import CreateUserRequest
 from app.modules.auth.service import AuthService
 from tests.helpers import ADMIN_PASSWORD, EMPLOYEE_PASSWORD, MANAGER_PASSWORD
 
 get_settings.cache_clear()
+clear_cached_location_mode()
 
 engine = create_async_engine(
     get_settings().database_url,
@@ -40,6 +49,7 @@ engine = create_async_engine(
     poolclass=NullPool,
 )
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+TEST_UPLOAD_DIR = Path(os.environ["UPLOAD_DIR"])
 
 
 async def _override_get_db_session() -> AsyncIterator[AsyncSession]:
@@ -53,10 +63,27 @@ async def _override_get_db_session() -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture(autouse=True)
 async def clean_database() -> AsyncIterator[None]:
-    """Start every test from an empty auth dataset."""
+    """Start every test from an empty auth/attendance dataset."""
+    clear_cached_location_mode()
+    if TEST_UPLOAD_DIR.exists():
+        shutil.rmtree(TEST_UPLOAD_DIR)
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE TABLE active_sessions, users RESTART IDENTITY CASCADE"))
+        await conn.execute(
+            text(
+                "TRUNCATE TABLE location_pings, attendance_sessions, location_settings, "
+                "active_sessions, users RESTART IDENTITY CASCADE"
+            )
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO location_settings (settings_id, singleton_key, location_mode) "
+                "VALUES (gen_random_uuid(), 'default', 'continuous')"
+            )
+        )
     yield
+    clear_cached_location_mode()
+    if TEST_UPLOAD_DIR.exists():
+        shutil.rmtree(TEST_UPLOAD_DIR)
 
 
 @pytest.fixture
