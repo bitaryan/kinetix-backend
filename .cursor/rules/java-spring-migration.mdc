@@ -1,0 +1,30 @@
+---
+description: Java Spring Boot rewrite — match the existing FastAPI HTTP contract; read docs/JAVA_REWRITE.md
+alwaysApply: true
+---
+
+# GPSS Java migration
+
+This branch rewrites the backend in Java 21 + Spring Boot. The live mobile/web contract is frozen.
+
+## Before writing Java
+
+1. Read `docs/JAVA_REWRITE.md` for the module you are touching.
+2. Read the matching Python files under `app/modules/<feature>/` and `tests/test_<feature>_flow.py`.
+3. Preserve paths, status codes, error `code` strings, cookie name/path/flags, and JSON property names (including mixed camelCase / snake_case).
+
+## Do
+
+- Feature packages: `com.gpss.backend.{auth,attendance,clientlog,leave,upload}`
+- Controllers thin, services own rules, repositories JPA only
+- Flyway for schema; baseline existing Postgres; no `ddl-auto`
+- Argon2 that verifies existing `users.password_hash` values
+- Location ping business rejects as HTTP 200 `{ accepted: false, reason }`
+
+## Do not
+
+- Change the API to "idiomatic Spring" (e.g. 401 for GPS rejects, BCrypt-only, refresh token in JSON)
+- Global Jackson `SNAKE_CASE`
+- Raw SQL in services
+- Add live-tracking WebSockets before HTTP parity
+- Delete or "clean up" Python `app/` until Java MockMvc matches `tests/`
