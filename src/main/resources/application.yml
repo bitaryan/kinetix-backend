@@ -1,0 +1,71 @@
+spring:
+  application:
+    name: ${APP_NAME:GPSS Backend}
+  datasource:
+    url: jdbc:postgresql://localhost:5432/gpss
+    username: gpss
+    password: gpss
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+      minimum-idle: 5
+      connection-timeout: ${DB_POOL_TIMEOUT_SECONDS:30}000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        type:
+          preferred_enum_jdbc_type: NAMED_ENUM
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: false
+    serialization:
+      write-dates-as-timestamps: false
+      write-bigdecimal-as-plain: true
+  servlet:
+    multipart:
+      max-file-size: ${MAX_UPLOAD_BYTES:5242880}
+      max-request-size: 15728640
+
+server:
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+
+gpss:
+  app-name: ${APP_NAME:GPSS Backend}
+  app-env: ${APP_ENV:development}
+  api-v1-prefix: ${API_V1_PREFIX:/api/v1}
+  jwt:
+    secret-key: ${JWT_SECRET_KEY:}
+    algorithm: ${JWT_ALGORITHM:HS256}
+    issuer: ${JWT_ISSUER:gpss-backend}
+    audience: ${JWT_AUDIENCE:gpss-client}
+    access-token-expire-minutes: ${ACCESS_TOKEN_EXPIRE_MINUTES:15}
+    refresh-token-expire-days: ${REFRESH_TOKEN_EXPIRE_DAYS:7}
+  cookie:
+    secure: ${COOKIE_SECURE:false}
+    same-site: ${COOKIE_SAMESITE:strict}
+  cors-origins: ${BACKEND_CORS_ORIGINS:http://localhost:3000,http://localhost:5173}
+  login-rate-limit-per-minute: ${LOGIN_RATE_LIMIT_PER_MINUTE:120}
+  refresh-rate-limit-per-minute: ${REFRESH_RATE_LIMIT_PER_MINUTE:300}
+  location-ping-rate-limit-per-minute: ${LOCATION_PING_RATE_LIMIT_PER_MINUTE:120}
+  location-ping-min-interval-seconds: ${LOCATION_PING_MIN_INTERVAL_SECONDS:5}
+  location-ping-max-per-session: ${LOCATION_PING_MAX_PER_SESSION:6000}
+  location-ping-batch-max: ${LOCATION_PING_BATCH_MAX:120}
+  location-ping-max-accuracy-meters: ${LOCATION_PING_MAX_ACCURACY_METERS:100}
+  live-stale-after-seconds: ${LIVE_STALE_AFTER_SECONDS:120}
+  live-offline-after-seconds: ${LIVE_OFFLINE_AFTER_SECONDS:900}
+  trusted-proxy-ips: ${TRUSTED_PROXY_IPS:}
+  upload-dir: ${UPLOAD_DIR:uploads}
+  max-upload-bytes: ${MAX_UPLOAD_BYTES:5242880}
+  public-base-url: ${PUBLIC_BASE_URL:}

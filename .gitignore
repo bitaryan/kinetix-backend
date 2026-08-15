@@ -11,3 +11,12 @@ __pycache__/
 coverage.xml
 htmlcov/
 uploads/
+.gradle/
+build/
+.idea/
+*.iml
+out/
+.classpath
+.project
+.settings/
+bin/
