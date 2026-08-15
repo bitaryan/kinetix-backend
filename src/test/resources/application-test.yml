@@ -1,0 +1,25 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: none
+  flyway:
+    enabled: true
+
+gpss:
+  app-env: test
+  jwt:
+    secret-key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  cookie:
+    secure: false
+    same-site: strict
+  cors-origins: http://localhost:3000
+  login-rate-limit-per-minute: 1000
+  refresh-rate-limit-per-minute: 1000
+  location-ping-rate-limit-per-minute: 1000
+  location-ping-min-interval-seconds: 0
+  location-ping-max-per-session: 6000
+  location-ping-batch-max: 120
+  trusted-proxy-ips: ""
+  upload-dir: uploads/test
+  max-upload-bytes: 5242880
+  public-base-url: ""
