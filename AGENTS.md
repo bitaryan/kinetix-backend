@@ -1,26 +1,24 @@
-# AGENTS.md — GPSS Backend (Java migration branch)
+# AGENTS.md — GPSS Backend
 
-This branch rewrites the API in **Java 21 + Spring Boot**. The Python tree under `app/` is the **behavioral oracle** until cutover. Do not change HTTP contracts to look more "Spring-like".
+Java 21 + Spring Boot API. Do not change HTTP contracts to look more "Spring-like".
 
-**Read first:** [`docs/JAVA_REWRITE.md`](docs/JAVA_REWRITE.md) — complete module specs, JSON keys, error codes, cookie attributes, and port order.
+**Read first:** [`docs/JAVA_REWRITE.md`](docs/JAVA_REWRITE.md) — paths, JSON keys, error codes, cookie attributes.
 
 ---
 
-## 1. Tech stack (this branch)
+## 1. Tech stack
 
 - **Language**: Java 21
 - **Framework**: Spring Boot 3.3+ (servlet stack)
-- **Database**: PostgreSQL 16 (existing schema — Flyway baseline, never `ddl-auto=create`)
+- **Database**: PostgreSQL 16 (Flyway; never `ddl-auto=create`)
 - **Persistence**: Spring Data JPA / Hibernate — **NO raw SQL in application code**
 - **Auth**: JWT access token in JSON (`Authorization: Bearer`) + opaque refresh token in **HttpOnly cookie** `refresh_token` with path `/api/v1/auth`
-- **Passwords**: Argon2id; must verify existing `pwdlib` PHC hashes in `users.password_hash`
+- **Passwords**: Argon2id; must verify existing PHC hashes in `users.password_hash`
 - **Roles**: `ADMIN`, `MANAGER`, `EMPLOYEE` (DB enum `user_role`)
 - **Validation**: Bean Validation on DTOs
 - **JSON**: Jackson with **explicit `@JsonProperty`**. Do not set global `SNAKE_CASE` — the live API mixes camelCase and snake_case by endpoint
 - **Tests**: JUnit 5 + MockMvc + Testcontainers PostgreSQL
 - **Package root**: `com.gpss.backend`
-
-Python FastAPI remains in `app/` as reference. New feature work on this branch goes in `src/main/java`.
 
 ---
 
@@ -53,7 +51,7 @@ Do not put business rules in controllers or repositories.
 
 ---
 
-## 4. Authentication & security (must match Python)
+## 4. Authentication & security
 
 - Login identifier is **employee ID** (`userId` JSON), stored uppercase — not email
 - Failed password or wrong role: increment `no_of_attempts`; at **≥ 5** lock 15 minutes (`locked_until`)
@@ -96,11 +94,9 @@ Copy **exact** `code` strings and cookie flags from `docs/JAVA_REWRITE.md`. Inve
 
 ---
 
-## 6. Porting rules for AI agents
+## 6. Contract rules
 
-1. Implement **parity** with Python tests before any "improvement".
-2. When unsure of a status code, JSON key, or message: open the Python endpoint + service + `tests/test_*_flow.py`.
-3. Do not add WebSockets, Redis, or live-map APIs until auth + attendance + leaves + client-logs pass parity tests.
-4. Attendance GPS: preserve soft-fail reasons (`TOO_FREQUENT`, `STALE_PING`, `SESSION_NOT_ACTIVE`, `SINGLE_LOCATION_MODE`, `SESSION_TRAIL_FULL`, `INVALID_TIMESTAMP`, `SESSION_NOT_FOUND`).
-5. Leave JSON dates are `DD/MM/YY`; status strings are title-case (`Pending`). Auth/attendance JSON is mostly camelCase.
-6. Uploads: magic-byte image check; employees may only read their own files under `/uploads/**`.
+1. Do not change paths, status codes, error `code` strings, or JSON keys without a client release.
+2. Attendance GPS: preserve soft-fail reasons (`TOO_FREQUENT`, `STALE_PING`, `SESSION_NOT_ACTIVE`, `SINGLE_LOCATION_MODE`, `SESSION_TRAIL_FULL`, `INVALID_TIMESTAMP`, `SESSION_NOT_FOUND`).
+3. Leave JSON dates are `DD/MM/YY`; status strings are title-case (`Pending`). Auth/attendance JSON is mostly camelCase.
+4. Uploads: magic-byte image check; employees may only read their own files under `/uploads/**`.

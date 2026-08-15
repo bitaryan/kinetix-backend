@@ -1,12 +1,11 @@
 # GPSS Backend — Complete Java / Spring Boot Rewrite Context
 
-This document is the **behavioral oracle** for rewriting `GPSS_Backend` in Java.
-Mobile and web clients already speak this HTTP contract. A rewrite that changes
-status codes, JSON keys, cookie attributes, or error `code` strings **breaks production clients**.
+This document is the **HTTP contract** for `GPSS_Backend` (Java 21 + Spring Boot).
+Mobile and web clients already speak this API. Changing status codes, JSON keys,
+cookie attributes, or error `code` strings **breaks production clients**.
 
-**Python source of truth (until cutover):** `app/`
-**Acceptance tests to port:** `tests/`
-**This branch:** Java migration. Do not silently change API behavior while porting.
+**Implementation:** `src/main/java`
+**Tests:** `src/test/java`
 
 ---
 

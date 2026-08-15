@@ -1,1 +1,0 @@
-"""GPSS backend application package."""
