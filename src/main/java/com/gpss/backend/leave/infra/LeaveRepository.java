@@ -25,8 +25,7 @@ public interface LeaveRepository extends JpaRepository<Leave, UUID> {
     Optional<Leave> findWithUserById(UUID id);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT l FROM Leave l WHERE l.id = :id")
-    Optional<Leave> findByIdForUpdate(@Param("id") UUID id);
+    Optional<Leave> findLockedById(UUID id);
 
     Page<Leave> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 

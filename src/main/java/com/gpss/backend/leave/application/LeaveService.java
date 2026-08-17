@@ -59,7 +59,7 @@ public class LeaveService {
 
     @Transactional
     public Leave apply(User user, LocalDate start, LocalDate end, String reason) {
-        User locked = users.findByIdForUpdate(user.getId()).orElse(null);
+        User locked = users.findLockedById(user.getId()).orElse(null);
         if (locked == null || !locked.isActive()) {
             throw new ApiException(401, "UNAUTHORIZED", "User account is unavailable");
         }
@@ -82,7 +82,7 @@ public class LeaveService {
         if (actor.getRole() != UserRole.MANAGER && actor.getRole() != UserRole.ADMIN) {
             throw new ApiException(403, "FORBIDDEN", "You do not have permission for this action");
         }
-        Leave leave = leaves.findByIdForUpdate(leaveId)
+        Leave leave = leaves.findLockedById(leaveId)
                 .orElseThrow(() -> new ApiException(404, "NOT_FOUND", "Leave application not found"));
         if (leave.getUserId().equals(actor.getId())) {
             throw new ApiException(

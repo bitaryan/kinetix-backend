@@ -5,9 +5,6 @@ import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Modifying;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 
 import com.gpss.backend.auth.domain.User;
 
@@ -20,10 +17,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmail(String email);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT u FROM User u WHERE u.employeeId = :employeeId")
-    Optional<User> findByEmployeeIdForUpdate(@Param("employeeId") String employeeId);
+    Optional<User> findLockedByEmployeeId(String employeeId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT u FROM User u WHERE u.id = :id")
-    Optional<User> findByIdForUpdate(@Param("id") UUID id);
+    Optional<User> findLockedById(UUID id);
 }

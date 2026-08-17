@@ -72,7 +72,7 @@ public class AuthService {
 
     @Transactional(noRollbackFor = ApiException.class)
     public IssuedTokens login(LoginRequest payload, String userAgent, String ipAddress) {
-        User user = users.findByEmployeeIdForUpdate(payload.normalizedEmployeeId()).orElse(null);
+        User user = users.findLockedByEmployeeId(payload.normalizedEmployeeId()).orElse(null);
         if (user == null) {
             jwtService.verifyDummyPassword(payload.password());
             throw invalidCredentials();
@@ -117,10 +117,10 @@ public class AuthService {
     @Transactional(noRollbackFor = ApiException.class)
     public IssuedTokens refresh(String refreshToken, String userAgent) {
         String tokenHash = jwtService.hashRefreshToken(refreshToken);
-        ActiveSession session = sessions.findByRefreshTokenHashForUpdate(tokenHash).orElse(null);
+        ActiveSession session = sessions.findLockedByRefreshTokenHash(tokenHash).orElse(null);
         Instant now = Instant.now();
         if (session == null) {
-            sessions.findByPreviousRefreshTokenHashForUpdate(tokenHash).ifPresent(reused -> {
+            sessions.findLockedByPreviousRefreshTokenHash(tokenHash).ifPresent(reused -> {
                 sessions.revokeForUser(reused.getUserId());
             });
             throw new ApiException(401, "INVALID_REFRESH_TOKEN", "Refresh token is invalid or expired");

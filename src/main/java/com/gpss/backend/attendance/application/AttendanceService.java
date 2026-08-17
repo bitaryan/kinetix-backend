@@ -100,10 +100,10 @@ public class AttendanceService {
             String capturedAtRaw,
             MultipartFile selfie,
             MultipartFile openingOdoImage) {
-        users.findByIdForUpdate(userId)
+        users.findLockedById(userId)
                 .orElseThrow(() -> new ApiException(401, "UNAUTHORIZED", "User account is unavailable"));
         List<AttendanceSession> existing =
-                sessions.findActiveForUserForUpdate(userId, AttendanceStatus.punched_in);
+                sessions.findLockedByUserIdAndStatusOrderByPunchedInAtDesc(userId, AttendanceStatus.punched_in);
         if (!existing.isEmpty()) {
             throw new ApiException(409, "ALREADY_PUNCHED_IN", "An active punch-in session already exists");
         }
@@ -152,7 +152,7 @@ public class AttendanceService {
     @Transactional
     public LocationPingData locationPing(UUID userId, LocationPingRequest payload) {
         LocationMode mode = resolveLocationMode();
-        AttendanceSession session = sessions.findByIdForUpdate(payload.sessionId()).orElse(null);
+        AttendanceSession session = sessions.findLockedById(payload.sessionId()).orElse(null);
         if (session == null || !session.getUserId().equals(userId)) {
             return new LocationPingData(false, "SESSION_NOT_FOUND", null, mode);
         }
@@ -174,7 +174,7 @@ public class AttendanceService {
             throw new ApiException(422, "VALIDATION_ERROR", "Request data is invalid");
         }
         LocationMode mode = resolveLocationMode();
-        AttendanceSession session = sessions.findByIdForUpdate(payload.sessionId()).orElse(null);
+        AttendanceSession session = sessions.findLockedById(payload.sessionId()).orElse(null);
         int n = payload.pings().size();
         if (session == null || !session.getUserId().equals(userId)) {
             return rejectAll(n, "SESSION_NOT_FOUND", mode);
@@ -230,10 +230,10 @@ public class AttendanceService {
             Double accuracy,
             String capturedAtRaw,
             MultipartFile closingOdoImage) {
-        users.findByIdForUpdate(userId)
+        users.findLockedById(userId)
                 .orElseThrow(() -> new ApiException(401, "UNAUTHORIZED", "User account is unavailable"));
         List<AttendanceSession> active =
-                sessions.findActiveForUserForUpdate(userId, AttendanceStatus.punched_in);
+                sessions.findLockedByUserIdAndStatusOrderByPunchedInAtDesc(userId, AttendanceStatus.punched_in);
         if (active.isEmpty()) {
             throw new ApiException(409, "NOT_PUNCHED_IN", "No active punch-in session to close");
         }
@@ -282,7 +282,7 @@ public class AttendanceService {
     @Transactional
     public LocationMode updateLocationMode(LocationMode mode) {
         LocationSettings row = settingsRows
-                .findBySingletonKeyForUpdate(SETTINGS_KEY)
+                .findLockedBySingletonKey(SETTINGS_KEY)
                 .orElseGet(() -> {
                     LocationSettings created = new LocationSettings();
                     created.setSingletonKey(SETTINGS_KEY);

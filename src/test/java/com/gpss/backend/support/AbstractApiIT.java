@@ -12,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -27,11 +26,20 @@ import org.testcontainers.utility.DockerImageName;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gpss.backend.attendance.application.LocationModeCache;
+import com.gpss.backend.attendance.domain.LocationMode;
+import com.gpss.backend.attendance.domain.LocationSettings;
+import com.gpss.backend.attendance.infra.AttendanceSessionRepository;
+import com.gpss.backend.attendance.infra.LocationPingRepository;
+import com.gpss.backend.attendance.infra.LocationSettingsRepository;
 import com.gpss.backend.auth.application.AuthService;
 import com.gpss.backend.auth.domain.User;
 import com.gpss.backend.auth.domain.UserRole;
+import com.gpss.backend.auth.infra.ActiveSessionRepository;
+import com.gpss.backend.auth.infra.UserRepository;
 import com.gpss.backend.auth.web.CreateUserRequest;
+import com.gpss.backend.clientlog.infra.ClientLogRepository;
 import com.gpss.backend.config.AppProperties;
+import com.gpss.backend.leave.infra.LeaveRepository;
 import com.gpss.backend.security.RateLimiter;
 
 @SpringBootTest
@@ -101,10 +109,28 @@ public abstract class AbstractApiIT {
     protected ObjectMapper objectMapper;
 
     @Autowired
-    protected JdbcTemplate jdbc;
+    protected AuthService authService;
 
     @Autowired
-    protected AuthService authService;
+    private LeaveRepository leaves;
+
+    @Autowired
+    private ClientLogRepository clientLogs;
+
+    @Autowired
+    private LocationPingRepository locationPings;
+
+    @Autowired
+    private AttendanceSessionRepository attendanceSessions;
+
+    @Autowired
+    private LocationSettingsRepository locationSettings;
+
+    @Autowired
+    private ActiveSessionRepository activeSessions;
+
+    @Autowired
+    private UserRepository users;
 
     @Autowired
     protected AppProperties properties;
@@ -135,12 +161,17 @@ public abstract class AbstractApiIT {
                         }
                     });
         }
-        jdbc.execute(
-                "TRUNCATE TABLE leaves, client_logs, location_pings, attendance_sessions, "
-                        + "location_settings, active_sessions, users RESTART IDENTITY CASCADE");
-        jdbc.execute(
-                "INSERT INTO location_settings (settings_id, singleton_key, location_mode) "
-                        + "VALUES (gen_random_uuid(), 'default', 'continuous')");
+        leaves.deleteAllInBatch();
+        clientLogs.deleteAllInBatch();
+        locationPings.deleteAllInBatch();
+        attendanceSessions.deleteAllInBatch();
+        locationSettings.deleteAllInBatch();
+        activeSessions.deleteAllInBatch();
+        users.deleteAllInBatch();
+        LocationSettings settings = new LocationSettings();
+        settings.setSingletonKey("default");
+        settings.setLocationMode(LocationMode.continuous);
+        locationSettings.save(settings);
     }
 
     protected User seedAdmin() {
