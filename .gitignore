@@ -1,13 +1,35 @@
+# Environment variables
 .env
-.env.*
+.env.local
 !.env.example
+.env*
+
+# Application files
 uploads/
-.gradle/
+logs/
+*.log
+
+# Java build output
+*.class
+bin/
+out/
 build/
+target/
+*.jar
+*.war
+
+# Gradle
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDEs
 .idea/
 *.iml
-out/
 .classpath
 .project
 .settings/
-bin/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
