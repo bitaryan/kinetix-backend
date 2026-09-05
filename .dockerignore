@@ -1,0 +1,10 @@
+.git
+.gradle
+build
+coverage
+node_modules
+test
+uploads
+.env*
+*.log
+.DS_Store

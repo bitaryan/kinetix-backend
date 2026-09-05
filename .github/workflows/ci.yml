@@ -1,0 +1,97 @@
+name: Backend verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gpss_test
+          POSTGRES_PASSWORD: ci-only-test-password
+          POSTGRES_DB: gpss_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gpss_test -d gpss_ci_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://gpss_test:ci-only-test-password@127.0.0.1:5432/gpss_ci_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Unit and HTTP contract tests
+        run: npm test
+        env:
+          # Integration tests run after applying migrations in the next step.
+          TEST_DATABASE_URL: ""
+          TEST_REDIS_URL: ""
+      - name: Migrations, schema parity, database and Redis integration
+        run: npm run test:integration
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: Build release images
+        run: |
+          docker build --target runtime --tag gpss-backend:ci .
+          docker build --target migrate --tag gpss-backend-migrate:ci .
+      - name: Verify migration image
+        run: >-
+          docker run --rm --network host --read-only --tmpfs /tmp:rw,nosuid,size=64m
+          --cap-drop ALL --security-opt no-new-privileges:true
+          --env DATABASE_URL="$TEST_DATABASE_URL" gpss-backend-migrate:ci
+      - name: Smoke test the runtime image
+        run: |
+          docker run --detach --name gpss-api-ci --network host \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --mount type=volume,destination=/app/uploads \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --env APP_ENV=test --env COOKIE_SECURE=false \
+            --env JWT_SECRET_KEY=ci-only-not-a-production-secret-0123456789abcdef \
+            --env DATABASE_URL="$TEST_DATABASE_URL" \
+            --env REDIS_URL="$TEST_REDIS_URL" \
+            gpss-backend:ci
+          for attempt in $(seq 1 30); do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' gpss-api-ci)" = healthy ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs gpss-api-ci
+          exit 1
+      - name: Runtime logs and cleanup
+        if: always()
+        run: |
+          if docker container inspect gpss-api-ci >/dev/null 2>&1; then
+            docker logs gpss-api-ci
+            docker rm --force --volumes gpss-api-ci
+          fi
