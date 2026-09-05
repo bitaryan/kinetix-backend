@@ -1,0 +1,189 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+
+  @@map("user_role")
+}
+
+enum AttendanceStatus {
+  punched_in
+  punched_out
+
+  @@map("attendance_status")
+}
+
+enum LocationMode {
+  continuous
+  single
+
+  @@map("location_mode")
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+
+  @@map("leave_status")
+}
+
+model User {
+  id            String    @id @default(uuid()) @map("user_id") @db.Uuid
+  employeeId    String    @unique @map("employee_id") @db.VarChar(30)
+  employeeName  String    @map("employee_name") @db.VarChar(100)
+  email         String    @unique @db.VarChar(255)
+  passwordHash  String    @map("password_hash") @db.VarChar(255)
+  role          UserRole
+  isActive      Boolean   @default(true) @map("is_active")
+  noOfAttempts  Int       @default(0) @map("no_of_attempts")
+  lockedUntil   DateTime? @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt   DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  activeSessions      ActiveSession[]
+  attendanceSessions  AttendanceSession[]
+  clientLogs          ClientLog[]
+  leaves              Leave[]             @relation("LeaveApplicant")
+  approvedLeaves      Leave[]             @relation("LeaveApprover")
+
+  @@map("users")
+}
+
+model ActiveSession {
+  id                       String   @id @default(uuid()) @map("session_id") @db.Uuid
+  userId                   String   @map("user_id") @db.Uuid
+  refreshTokenHash         String   @unique @map("refresh_token_hash") @db.VarChar(64)
+  previousRefreshTokenHash String?  @unique @map("previous_refresh_token_hash") @db.VarChar(64)
+  userAgent                String?  @map("user_agent")
+  ipAddress                String?  @map("ip_address") @db.VarChar(45)
+  isRevoked                Boolean  @default(false) @map("is_revoked")
+  expiresAt                DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId], map: "ix_active_sessions_user_id")
+  @@map("active_sessions")
+}
+
+model AttendanceSession {
+  id                    String           @id @default(uuid()) @map("session_id") @db.Uuid
+  userId                String           @map("user_id") @db.Uuid
+  status                AttendanceStatus
+  openingOdoKm          Decimal          @map("opening_odo_km") @db.Decimal(10, 2)
+  openingSelfiePath     String           @map("opening_selfie_path") @db.VarChar(512)
+  openingOdoImagePath   String           @map("opening_odo_image_path") @db.VarChar(512)
+  closingOdoKm          Decimal?         @map("closing_odo_km") @db.Decimal(10, 2)
+  closingOdoImagePath   String?          @map("closing_odo_image_path") @db.VarChar(512)
+  punchInLatitude       Float            @map("punch_in_latitude")
+  punchInLongitude      Float            @map("punch_in_longitude")
+  punchInAccuracy       Float?           @map("punch_in_accuracy")
+  punchOutLatitude      Float?           @map("punch_out_latitude")
+  punchOutLongitude     Float?           @map("punch_out_longitude")
+  punchOutAccuracy      Float?           @map("punch_out_accuracy")
+  punchedInAt           DateTime         @map("punched_in_at") @db.Timestamptz(6)
+  punchedOutAt          DateTime?        @map("punched_out_at") @db.Timestamptz(6)
+  pingCount             Int              @default(0) @map("ping_count")
+  lastKnownLatitude     Float?           @map("last_known_latitude")
+  lastKnownLongitude    Float?           @map("last_known_longitude")
+  lastKnownAccuracy     Float?           @map("last_known_accuracy")
+  lastKnownCapturedAt   DateTime?        @map("last_known_captured_at") @db.Timestamptz(6)
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  locationPings LocationPing[]
+
+  @@index([userId], map: "ix_attendance_sessions_user_id")
+  @@index([userId, status], map: "ix_attendance_sessions_user_status")
+  @@map("attendance_sessions")
+}
+
+model LocationPing {
+  id                    String   @id @default(uuid()) @map("ping_id") @db.Uuid
+  attendanceSessionId   String   @map("attendance_session_id") @db.Uuid
+  latitude              Float
+  longitude             Float
+  accuracy              Float?
+  capturedAt            DateTime @map("captured_at") @db.Timestamptz(6)
+  battery               Float?
+  speed                 Float?
+  clientEventId         String?  @map("client_event_id") @db.Uuid
+  isMock                Boolean? @map("is_mock")
+  accuracyFlag          String?  @map("accuracy_flag") @db.VarChar(32)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  attendanceSession AttendanceSession @relation(fields: [attendanceSessionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([attendanceSessionId], map: "ix_location_pings_attendance_session_id")
+  @@index([attendanceSessionId, capturedAt], map: "ix_location_pings_session_captured_at")
+  @@map("location_pings")
+}
+
+model LocationSettings {
+  id           String       @id @default(uuid()) @map("settings_id") @db.Uuid
+  singletonKey String       @unique(map: "uq_location_settings_singleton") @map("singleton_key") @db.VarChar(32)
+  locationMode LocationMode @map("location_mode")
+  updatedAt    DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("location_settings")
+}
+
+model ClientLog {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  clientName       String    @map("client_name") @db.VarChar(150)
+  companyName      String    @map("company_name") @db.VarChar(200)
+  mobileNumber     String    @map("mobile_number") @db.VarChar(20)
+  mailId           String    @map("mail_id") @db.VarChar(255)
+  logDate          DateTime  @map("log_date") @db.Date
+  selfiePath       String?   @map("selfie_path")
+  latitude         Decimal?  @db.Decimal(10, 8)
+  longitude        Decimal?  @db.Decimal(11, 8)
+  locationAccuracy Float?    @map("location_accuracy")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId], map: "idx_client_logs_user_id")
+  @@index([logDate(sort: Desc)], map: "idx_client_logs_log_date")
+  @@index([clientName, companyName, mobileNumber], map: "idx_client_logs_search")
+  @@map("client_logs")
+}
+
+model Leave {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  startDate       DateTime    @map("start_date") @db.Date
+  endDate         DateTime    @map("end_date") @db.Date
+  reason          String      @default("")
+  status          LeaveStatus @default(PENDING)
+  approvedBy      String?     @map("approved_by") @db.Uuid
+  rejectionReason String?     @map("rejection_reason")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  applicant User  @relation("LeaveApplicant", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  approver  User? @relation("LeaveApprover", fields: [approvedBy], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([userId], map: "idx_leaves_user_id")
+  @@index([createdAt(sort: Desc)], map: "idx_leaves_created_at")
+  @@index([status], map: "idx_leaves_status")
+  @@index([userId, startDate, endDate], map: "idx_leaves_user_dates")
+  @@map("leaves")
+}

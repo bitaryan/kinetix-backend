@@ -1,0 +1,41 @@
+{
+  "name": "gpss-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GPSS field-workforce API implemented with Node.js, Express, and Prisma",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "build": "node scripts/prisma-cli.js generate",
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1 test/**/*.test.js",
+    "test:unit": "node --test --test-concurrency=1 test/unit/**/*.test.js",
+    "test:integration": "node test/integration/run.js",
+    "db:generate": "node scripts/prisma-cli.js generate",
+    "db:migrate": "node scripts/prisma-cli.js migrate deploy",
+    "db:verify": "node scripts/verify-schema.js",
+    "db:baseline": "node scripts/prisma-cli.js migrate resolve --applied 20260816000000_existing_schema",
+    "db:studio": "node scripts/prisma-cli.js studio",
+    "create-admin": "node src/bootstrap/create-admin.js"
+  },
+  "dependencies": {
+    "@prisma/client": "6.12.0",
+    "argon2": "^0.45.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "pg": "^8.16.3",
+    "redis": "5.12.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "prisma": "6.12.0",
+    "supertest": "^7.1.4"
+  }
+}
