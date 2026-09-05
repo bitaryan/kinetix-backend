@@ -1,102 +1,109 @@
 # AGENTS.md — GPSS Backend
 
-Java 21 + Spring Boot API. Do not change HTTP contracts to look more "Spring-like".
+Node.js + Express + Prisma API. Do not change HTTP contracts to look more
+"Express-like".
 
-**Read first:** [`docs/JAVA_REWRITE.md`](docs/JAVA_REWRITE.md) — paths, JSON keys, error codes, cookie attributes.
+**Read first:** [`docs/JAVA_REWRITE.md`](docs/JAVA_REWRITE.md). The historical
+filename is retained for compatibility; its paths, JSON keys, status/error
+codes, soft GPS failures, and cookie attributes are the language-neutral API
+contract. `docs/GPS_CLIENT.md` documents the additive V2 GPS/live behavior.
 
----
+## 1. Stack
 
-## 1. Tech stack
-
-- **Language**: Java 21
-- **Framework**: Spring Boot 3.3+ (servlet stack)
-- **Database**: PostgreSQL 16 (Flyway; never `ddl-auto=create`)
-- **Persistence**: Spring Data JPA / Hibernate — **NO raw SQL in application code**
-- **Auth**: JWT access token in JSON (`Authorization: Bearer`) + opaque refresh token in **HttpOnly cookie** `refresh_token` with path `/api/v1/auth`
-- **Passwords**: Argon2id; must verify existing PHC hashes in `users.password_hash`
-- **Roles**: `ADMIN`, `MANAGER`, `EMPLOYEE` (DB enum `user_role`)
-- **Validation**: Bean Validation on DTOs
-- **JSON**: Jackson with **explicit `@JsonProperty`**. Do not set global `SNAKE_CASE` — the live API mixes camelCase and snake_case by endpoint
-- **Tests**: JUnit 5 + MockMvc + Testcontainers PostgreSQL
-- **Package root**: `com.gpss.backend`
-
----
+- JavaScript ESM on Node.js 20.19+ (use an even-numbered LTS in production)
+- Express 5, PostgreSQL 16, Prisma ORM
+- PostgreSQL migrations in `prisma/migrations`; never use `db push` in production
+- Argon2id password hashes; existing PHC strings must continue to verify
+- JWT access token plus opaque refresh token in the HttpOnly `refresh_token`
+  cookie, scoped to `/api/v1/auth`
+- Roles: `ADMIN`, `MANAGER`, `EMPLOYEE` (native DB enum `user_role`)
+- Node test runner + Supertest; database suites require an explicit isolated
+  `TEST_DATABASE_URL`
 
 ## 2. Architecture
 
-Feature packages: `auth`, `attendance`, `clientlog`, `leave`, `upload`.
+Feature directories are `auth`, `attendance`, `clientlog`, `leave`, `upload`,
+and `live`.
 
-Inside each feature:
+- Routers parse HTTP input and map responses only.
+- Services own business rules, transactions, lockout, overlap, punch, and GPS
+  decisions.
+- Prisma is the only application persistence API. Raw SQL belongs only in
+  migration files.
+- Shared envelopes/errors/validation live under `src/common`.
+- Authentication and rate limiting live under `src/security`.
 
-- **api** (`@RestController`): HTTP parsing and response mapping ONLY
-- **application** (`@Service`): business logic (lockout, overlap, punch rules, GPS accept/reject)
-- **infra** (Spring Data repositories): ORM ONLY
-- **web / dto**: request and response records
-- **domain**: JPA entities and enums
+Do not put business rules into route registration or persistence helpers.
 
-Do not put business rules in controllers or repositories.
+## 3. Database
 
----
+- Database columns remain `snake_case`; Prisma fields use camelCase with `@map`.
+- Primary keys have existing names such as `user_id`, `session_id`, `ping_id`.
+- Native enum values are authoritative:
+  - attendance: `punched_in`, `punched_out`
+  - location mode: `continuous`, `single`
+  - leave: `PENDING`, `APPROVED`, `REJECTED`, `CANCELLED`
+- Preserve the leave CHECK constraint and both partial unique indexes from the
+  custom baseline migration.
+- Use serializable interactive transactions with bounded P2034 retries when a
+  flow previously relied on pessimistic row locks.
+- Never run destructive migration commands against an existing environment.
 
-## 3. Database & ORM
+## 4. Authentication and security
 
-- Columns: `snake_case` (`employee_name`, `no_of_attempts`, `locked_until`)
-- Java fields: `camelCase` + `@Column(name = "...")`
-- PK column names often differ from Java (`user_id`, `session_id`, `ping_id`)
-- Enum **stored values** (not Java names):
-  - attendance: `punched_in` / `punched_out`
-  - location mode: `continuous` / `single`
-  - leave: `PENDING` / `APPROVED` / `REJECTED` / `CANCELLED`
-- Schema changes: Flyway SQL only. Never alter tables by hand or via Hibernate DDL.
+- Login identifier is uppercase employee ID (`userId`), never email.
+- Failed password or wrong role increments `no_of_attempts`; at five attempts,
+  lock for 15 minutes.
+- Unknown user, inactive user, lockout, wrong password, and wrong role share
+  `401 INVALID_CREDENTIALS / "Invalid user ID or password"`.
+- Login revokes older sessions. Refresh rotates the token; reuse of the previous
+  token revokes all sessions for that user.
+- Every Bearer request reloads and validates the active session and user. JWT
+  role claims are never the source of authorization.
+- Never log or return passwords, password hashes, or raw refresh tokens.
+- Employees may only read their own files under `/uploads/**`; prevent traversal
+  and symlink escapes with real-path containment checks.
+- Keep the explicit CORS allow-list and exact security headers.
 
----
+## 5. HTTP contract
 
-## 4. Authentication & security
-
-- Login identifier is **employee ID** (`userId` JSON), stored uppercase — not email
-- Failed password or wrong role: increment `no_of_attempts`; at **≥ 5** lock 15 minutes (`locked_until`)
-- Same public error for unknown user, lockout, inactive, bad password, wrong role: `401 INVALID_CREDENTIALS` `"Invalid user ID or password"`
-- One active refresh session per user on login (revoke others)
-- Refresh **rotation** + reuse of `previous_refresh_token_hash` revokes **all** sessions for that user
-- Check `is_revoked == false` and `expires_at` on refresh and on every Bearer request (session row)
-- Never log passwords, never return `password_hash` or the refresh token in JSON
-- GPS business failures are **HTTP 200** with `data.accepted = false` and `data.reason` — not 4xx
-
----
-
-## 5. Standard API envelope
+Success:
 
 ```json
-{
-  "success": true,
-  "data": { },
-  "error": null
-}
+{"success":true,"data":{},"error":null}
 ```
 
 Failure:
 
 ```json
-{
-  "success": false,
-  "data": null,
-  "error": {
-    "code": "INVALID_CREDENTIALS",
-    "message": "Invalid user ID or password"
-  }
-}
+{"success":false,"data":null,"error":{"code":"INVALID_CREDENTIALS","message":"Invalid user ID or password"}}
 ```
 
-Leaves list also has `meta: { total, page, limit }`.
-Client-log list has `meta: { page, limit, totalCount, totalPages }`.
+- Leaves and client-log lists include their distinct exact `meta` shapes.
+- The API deliberately mixes camelCase and snake_case by endpoint.
+- Leave output dates use `DD/MM/YY` and title-case statuses.
+- GPS business failures return HTTP 200 with `data.accepted=false`; preserve all
+  documented reasons plus V2 `LOW_ACCURACY` and idempotent `DUPLICATE` behavior.
+- Do not change paths, methods, status codes, codes, messages, JSON keys, or
+  refresh-cookie attributes without a coordinated client release.
 
-Copy **exact** `code` strings and cookie flags from `docs/JAVA_REWRITE.md`. Inventing new codes breaks the mobile app.
+## 6. Images and live tracking
 
----
+- Validate declared MIME plus magic bytes. Attendance accepts JPEG/PNG/WebP;
+  client-log selfies accept JPEG/PNG only.
+- Store only relative database paths below `UPLOAD_DIR`.
+- Manager/admin live subscribers use raw WebSocket + STOMP at `/ws`, topic
+  `/topic/live-locations`. Phones send authenticated HTTP pings and do not open
+  the dashboard socket.
+- Without `REDIS_URL`, rate limits and WebSocket fan-out are single-instance.
+  Configured Redis is required for shared limits/live events; never silently
+  fall back during outages. Multiple replicas need the same private upload filesystem.
 
-## 6. Contract rules
+## 7. Verification
 
-1. Do not change paths, status codes, error `code` strings, or JSON keys without a client release.
-2. Attendance GPS: preserve soft-fail reasons (`TOO_FREQUENT`, `STALE_PING`, `SESSION_NOT_ACTIVE`, `SINGLE_LOCATION_MODE`, `SESSION_TRAIL_FULL`, `INVALID_TIMESTAMP`, `SESSION_NOT_FOUND`).
-3. Leave JSON dates are `DD/MM/YY`; status strings are title-case (`Pending`). Auth/attendance JSON is mostly camelCase.
-4. Uploads: magic-byte image check; employees may only read their own files under `/uploads/**`.
+- Run `npm test` for every change.
+- Run integration tests only with an explicitly isolated database whose name
+  contains `test`; never fall back to the normal development database.
+- Run `npm run db:generate` after Prisma model changes.
+- Compare migrations/model on a disposable PostgreSQL database when schema
+  changes affect native enums, constraints, or indexes.

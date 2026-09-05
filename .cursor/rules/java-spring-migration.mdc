@@ -1,9 +1,9 @@
 ---
-description: GPSS Java Spring Boot — frozen HTTP contract; read docs/JAVA_REWRITE.md
+description: GPSS Node.js/Express/Prisma — frozen HTTP contract; read docs/JAVA_REWRITE.md
 alwaysApply: true
 ---
 
-# GPSS Java backend
+# GPSS Node.js backend
 
 The live mobile/web contract is frozen.
 
@@ -14,14 +14,14 @@ The live mobile/web contract is frozen.
 
 ## Do
 
-- Feature packages: `com.gpss.backend.{auth,attendance,clientlog,leave,upload}`
-- Controllers thin, services own rules, repositories JPA only
-- Flyway for schema; no `ddl-auto`
+- Feature directories: `src/{auth,attendance,clientlog,leave,upload,live}`
+- Routers parse/map HTTP, services own rules, persistence uses Prisma only
+- Prisma migrations for schema; no production `db push` or reset
 - Argon2 that verifies existing `users.password_hash` values
 - Location ping business rejects as HTTP 200 `{ accepted: false, reason }`
 
 ## Do not
 
-- Change the API to "idiomatic Spring" (e.g. 401 for GPS rejects, BCrypt-only, refresh token in JSON)
-- Global Jackson `SNAKE_CASE`
+- Change the deployed API (e.g. 401 for GPS rejects, BCrypt-only, refresh token in JSON)
+- Globally rename JSON keys
 - Raw SQL in services

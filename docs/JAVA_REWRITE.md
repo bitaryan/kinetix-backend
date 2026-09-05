@@ -1,11 +1,26 @@
-# GPSS Backend — Complete Java / Spring Boot Rewrite Context
+# GPSS Backend — Frozen API and Database Contract
 
-This document is the **HTTP contract** for `GPSS_Backend` (Java 21 + Spring Boot).
+This document is the **HTTP contract** for `GPSS_Backend`.
 Mobile and web clients already speak this API. Changing status codes, JSON keys,
 cookie attributes, or error `code` strings **breaks production clients**.
 
-**Implementation:** `src/main/java`
-**Tests:** `src/test/java`
+> **Implementation update (August 2026):** the active service is now JavaScript
+> ESM on Node.js, Express, and Prisma. Java-specific stack, package-layout, and
+> implementation-sequence sections below are retained as migration history.
+> The HTTP, JSON, security, database, and business rules remain authoritative.
+> Additive GPS V2 behavior in [`GPS_CLIENT.md`](GPS_CLIENT.md) takes precedence
+> over the original V1 notes below, including live locations and per-request
+> batch rate-limit cost.
+
+> **Production completion (September 2026):** documented V2 offline ingestion
+> now supports spaced historical samples without regressing the newest position;
+> duplicate batch retries are consistent across modes. Optional Redis shares
+> rate limits and live events. Additive `/livez` and `/readyz` probes support
+> deployment health checks; existing `/health` remains unchanged. See
+> [`PRODUCTION.md`](PRODUCTION.md) for current deployment/configuration behavior.
+
+**Implementation:** `src/`
+**Tests:** `test/`
 
 ---
 
@@ -19,12 +34,12 @@ Global Power Sales & Service (GPSS) — field workforce API:
 - Leave apply / approve / reject.
 - Admin creates users and toggles org-wide location mode.
 
-There is **no live dashboard read API and no WebSocket hub** in Python today.
-Do **not** invent those during the first Java parity cut. Parity first; live map later.
+The original Python parity cut had no live dashboard API or WebSocket hub.
+The deployed V2 service now includes both; see [`GPS_CLIENT.md`](GPS_CLIENT.md).
 
 ---
 
-## 2. Target stack (locked)
+## 2. Historical Java target stack (superseded)
 
 | Concern | Choice |
 |---|---|
@@ -52,7 +67,7 @@ Do **not** invent those during the first Java parity cut. Parity first; live map
 
 ---
 
-## 3. Package layout (feature modules)
+## 3. Historical Java package layout (superseded)
 
 Mirror Python `app/modules/<feature>/`.
 
@@ -578,7 +593,7 @@ Keys: `login:{ip}`, `refresh:{ip}`, `locping:user:{id}`, `locping:ip:{ip}`.
 
 ---
 
-## 14. Implementation sequence (do in this order)
+## 14. Historical Java implementation sequence
 
 1. Gradle + Spring Boot app, envelope, exception handler, CORS, security headers, health.
 2. Flyway baseline against existing Postgres.
@@ -626,6 +641,6 @@ Use Testcontainers PostgreSQL. Do not hit a shared dev DB.
 
 - Same paths, methods, status codes, error codes, cookie name/path/flags.
 - Existing Argon2 hashes in Postgres still log in.
-- Flutter/web clients work against Java with **no client change**.
+- Flutter/web clients work against Node with **no client change**.
 - `GET /health` and all `/api/v1/*` routes from `CODE_REVIEW_GUIDE.md` section 7 exist.
 - No `ddl-auto` schema drift vs Flyway.
