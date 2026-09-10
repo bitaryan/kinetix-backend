@@ -20,6 +20,7 @@ FROM build AS migrate
 
 COPY scripts ./scripts
 COPY src ./src
+COPY assets ./assets
 USER node
 CMD ["node", "scripts/prisma-cli.js", "migrate", "deploy"]
 
@@ -34,6 +35,8 @@ COPY package.json package-lock.json ./
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY prisma ./prisma
 COPY src ./src
+COPY scripts ./scripts
+COPY assets ./assets
 
 RUN mkdir -p /app/uploads && chown -R node:node /app
 USER node

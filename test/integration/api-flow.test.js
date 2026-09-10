@@ -8,6 +8,7 @@ import test from 'node:test';
 
 import request from 'supertest';
 
+import { attendanceDay } from '../../src/attendance/day.js';
 import { createApplication } from '../../src/app.js';
 import { loadConfig } from '../../src/config/env.js';
 import { createPrisma } from '../../src/db/prisma.js';
@@ -55,7 +56,10 @@ if (!TEST_DATABASE_URL) {
       MAX_UPLOAD_BYTES: String(5 * 1024 * 1024),
     });
     const prisma = createPrisma(config);
-    const application = createApplication({ config, prisma });
+    const day = attendanceDay(new Date());
+    const attendanceOffset = Date.now() >= day.cutoff.getTime() ? 4 * 3600000 : 0;
+    const attendanceNow = () => new Date(Date.now() + attendanceOffset);
+    const application = createApplication({ config, prisma, attendanceNow });
     const api = request(application.app);
     const suffix = randomUUID().replaceAll('-', '').slice(0, 16);
     const adminEmployeeId = `ADM${suffix}`.toUpperCase();
@@ -102,6 +106,7 @@ if (!TEST_DATABASE_URL) {
     const employee = await application.auth.service.createUser({
       userId: employeeEmployeeId,
       employeeName: 'Employee User',
+      locationTrackingEnabled: true,
       email: `employee-${suffix}@example.com`,
       password: 'Employee-pass-12',
       role: 'EMPLOYEE',
@@ -153,7 +158,7 @@ if (!TEST_DATABASE_URL) {
     assert.deepEqual(leaveList.body.meta, { total: 1, page: 1, limit: 20 });
     const approved = await api
       .patch(`/api/v1/leaves/${leave.body.data.id}/status`)
-      .set('Authorization', managerAuth)
+      .set('Authorization', adminAuth)
       .send({ status: 'APPROVED', rejection_reason: null });
     assert.equal(approved.status, 200);
     assert.equal(approved.body.data.status, 'Approved');
@@ -172,7 +177,7 @@ if (!TEST_DATABASE_URL) {
     const pendingLeave = concurrentLeaves.find((response) => response.status === 201).body.data;
     const decisions = await Promise.all(['APPROVED', 'REJECTED'].map((status) => api
       .patch(`/api/v1/leaves/${pendingLeave.id}/status`)
-      .set('Authorization', managerAuth)
+      .set('Authorization', adminAuth)
       .send({ status, rejection_reason: status === 'REJECTED' ? 'Concurrent decision' : null })));
     assert.deepEqual(decisions.map((response) => response.status).sort(), [200, 409]);
     assert.equal(decisions.find((response) => response.status === 409).body.error.code, 'INVALID_LEAVE_STATE');
@@ -228,7 +233,7 @@ if (!TEST_DATABASE_URL) {
     assert.equal(storedSelfie.status, 200);
     assert.equal(storedSelfie.headers['content-type'], 'image/jpeg');
 
-    const shiftStartedAt = new Date(Date.now() - 60_000);
+    const shiftStartedAt = new Date(attendanceNow().getTime() - 60_000);
     const punchIns = await Promise.all([0, 1].map(() => api
       .post('/api/v1/attendance/punch-in')
       .set('Authorization', employeeAuth)
@@ -301,7 +306,7 @@ if (!TEST_DATABASE_URL) {
       .field('closingOdoKm', '1250.00')
       .field('latitude', '28.62')
       .field('longitude', '77.22')
-      .field('capturedAt', new Date().toISOString())
+      .field('capturedAt', attendanceNow().toISOString())
       .attach('closingOdoImage', TINY_JPEG, { filename: 'closing.jpg', contentType: 'image/jpeg' })));
     assert.deepEqual(punchOuts.map((response) => response.status).sort(), [200, 409]);
     const punchOut = punchOuts.find((response) => response.status === 200);

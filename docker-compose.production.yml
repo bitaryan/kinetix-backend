@@ -31,6 +31,32 @@ services:
         max-size: 10m
         max-file: "5"
 
+  worker:
+    image: gpss-backend:${GPSS_IMAGE_TAG:?Set GPSS_IMAGE_TAG to the release identifier}
+    profiles: [notifications]
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      APP_ENV: production
+      COOKIE_SECURE: "true"
+    command: [node, scripts/worker.js]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    stop_grace_period: 20s
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
   migrate:
     image: gpss-backend-migrate:${GPSS_IMAGE_TAG:?Set GPSS_IMAGE_TAG to the release identifier}
     build:

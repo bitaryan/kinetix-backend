@@ -41,6 +41,8 @@ test('server verifies storage and dependencies, listens, then disconnects once o
     async $connect() { calls.push('connect'); },
     async $disconnect() { calls.push('disconnect'); },
     user: { async count() { calls.push('query'); return 0; } },
+    attendanceSession: { async findMany() { return []; } },
+    geofenceState: { async count() { return 0; } },
   };
   const runtime = await startServer({ config: { ...config(), uploadDir }, prisma, port: 0, host: '127.0.0.1' });
   t.after(() => runtime.stop());
@@ -84,6 +86,8 @@ test('shutdown drains an in-flight request before disconnecting persistence', as
     prisma: {
       async $connect() {},
       async $disconnect() { disconnected = true; },
+      attendanceSession: { async findMany() { return []; } },
+    geofenceState: { async count() { return 0; } },
       user: { async count() {
         if (++queryCount > 1) { began(); await pendingQuery; }
         return 0;

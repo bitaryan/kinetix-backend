@@ -102,7 +102,9 @@ test('leave status service rejects invalid reasons, self decisions, and non-pend
       },
     }),
   });
-  const actor = { id: MANAGER_ID, role: 'MANAGER' };
+  const actor = { id: MANAGER_ID, role: 'ADMIN' };
+  await assert.rejects(service.updateStatus({ ...actor, role: 'MANAGER' }, ITEM_ID, { status: 'APPROVED' }),
+    apiFailure(403, 'FORBIDDEN', 'You do not have permission for this action'));
   for (const input of [
     { status: 'REJECTED', rejectionReason: null },
     { status: 'APPROVED', rejectionReason: 'Not allowed' },
@@ -149,7 +151,7 @@ test('client-log service validates paired coordinates and cleans a saved image a
   assert.deepEqual(calls, ['save', stored]);
 });
 
-test('client-log delete applies owner scope to managers and never deletes images without a deleted row', async () => {
+test('client-log delete denies managers and never deletes images without a deleted row', async () => {
   let findWhere;
   let deleteWhere;
   let count = 0;
@@ -164,8 +166,12 @@ test('client-log delete applies owner scope to managers and never deletes images
     images: { deleteStoredFiles: async (file) => deleted.push(file) },
   });
   await assert.rejects(service.remove({ id: MANAGER_ID, role: 'MANAGER' }, ITEM_ID),
+    apiFailure(403, 'FORBIDDEN', 'You do not have permission for this action'));
+  assert.equal(findWhere, undefined);
+  assert.equal(deleteWhere, undefined);
+  await assert.rejects(service.remove({ id: MANAGER_ID, role: 'ADMIN' }, ITEM_ID),
     apiFailure(404, 'NOT_FOUND', 'Client log not found'));
-  assert.deepEqual(findWhere, { id: ITEM_ID, userId: MANAGER_ID });
+  assert.deepEqual(findWhere, { id: ITEM_ID });
   assert.deepEqual(deleteWhere, findWhere);
   assert.deepEqual(deleted, []);
   count = 1;

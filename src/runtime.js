@@ -2,6 +2,7 @@ import http from 'node:http';
 import { constants } from 'node:fs';
 import { access, mkdir } from 'node:fs/promises';
 
+import { startAutoPunchOutScheduler } from './attendance/auto-punch-out.js';
 import { createApplication } from './app.js';
 import { loadConfig } from './config/env.js';
 import { createPrisma } from './db/prisma.js';
@@ -20,6 +21,7 @@ export async function startServer({
   let application;
   let liveSocket;
   let stopping;
+  let attendanceScheduler;
 
   function stop() {
     if (stopping) return stopping;
@@ -38,6 +40,7 @@ export async function startServer({
           clearTimeout(deadline);
         }
       }
+      await attendanceScheduler?.stop();
       application?.liveHub.close?.();
       redis?.close();
       await prisma.$disconnect();
@@ -51,8 +54,13 @@ export async function startServer({
     await prisma.$connect();
     // Connecting alone does not detect an absent application schema.
     await prisma.user.count();
+    // The last table in the additive migration must exist before serving V2
+    // or V1 mutations that now write transactional workflow events.
+    await prisma.geofenceState.count();
     await redis?.connect();
     application = createApplication({ config, prisma, redis, isReady: () => ready });
+    await application.attendance.autoPunchOut();
+    attendanceScheduler = startAutoPunchOutScheduler({ run: () => application.attendance.autoPunchOut() });
     server = http.createServer({
       requestTimeout: 60_000,
       headersTimeout: 15_000,
@@ -60,7 +68,7 @@ export async function startServer({
     }, application.app);
     server.maxRequestsPerSocket = 1000;
     server.setTimeout(120_000, (socket) => socket.destroy());
-    liveSocket = attachLiveWebSocket({ server, auth: application.auth, liveHub: application.liveHub, config });
+    liveSocket = attachLiveWebSocket({ server, auth: application.auth, liveHub: application.liveHub, config, telemetry: application.telemetry });
     await new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(port, host, () => { server.off('error', reject); resolve(); });
