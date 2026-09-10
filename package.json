@@ -19,7 +19,11 @@
     "db:verify": "node scripts/verify-schema.js",
     "db:baseline": "node scripts/prisma-cli.js migrate resolve --applied 20260816000000_existing_schema",
     "db:studio": "node scripts/prisma-cli.js studio",
-    "create-admin": "node src/bootstrap/create-admin.js"
+    "create-admin": "node src/bootstrap/create-admin.js",
+    "worker": "node scripts/worker.js",
+    "retention": "node scripts/retention.js",
+    "test:load": "node scripts/load-test.js",
+    "smoke": "node scripts/smoke.js"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
@@ -30,6 +34,7 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
+    "pdfkit": "^0.17.2",
     "pg": "^8.16.3",
     "redis": "5.12.1",
     "ws": "^8.18.3"

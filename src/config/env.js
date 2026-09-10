@@ -198,12 +198,37 @@ export function loadConfig(env = process.env) {
     { min: 1 },
   );
 
+  const metricsToken = env.METRICS_TOKEN?.trim() || null;
+  if (metricsToken && (metricsToken.length < 32 || /\s/.test(metricsToken))) throw new Error('METRICS_TOKEN must be at least 32 characters without whitespace');
+  const notificationWebhookUrl = env.NOTIFICATION_WEBHOOK_URL?.trim() || null;
+  const notificationWebhookSecret = env.NOTIFICATION_WEBHOOK_SECRET?.trim() || null;
+  const deliveryEncryptionKey = env.DELIVERY_ENCRYPTION_KEY?.trim() || null;
+  const passwordResetUrl = env.PASSWORD_RESET_URL?.trim() || null;
+  for (const [name, value] of [['NOTIFICATION_WEBHOOK_URL', notificationWebhookUrl], ['PASSWORD_RESET_URL', passwordResetUrl]]) {
+    if (!value) continue;
+    let url;
+    try { url = new URL(value); } catch { throw new Error(`${name} must be an HTTPS URL`); }
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error(`${name} must be an HTTPS URL without credentials or a fragment`);
+  }
+  if (notificationWebhookUrl && (!notificationWebhookSecret || notificationWebhookSecret.length < 32 || !/^[a-f0-9]{64}$/i.test(deliveryEncryptionKey ?? ''))) {
+    throw new Error('Delivery requires NOTIFICATION_WEBHOOK_SECRET (32+ characters) and DELIVERY_ENCRYPTION_KEY (64 hex characters)');
+  }
+  if (passwordResetUrl && !notificationWebhookUrl) throw new Error('PASSWORD_RESET_URL requires notification delivery');
+
   return Object.freeze({
     appName: env.APP_NAME?.trim() || 'GPSS Backend',
     appEnv,
     port: integer(env.PORT, 8080, 'PORT', { min: 1, max: 65535 }),
     shutdownTimeoutMs: integer(env.SHUTDOWN_TIMEOUT_MS, 30_000, 'SHUTDOWN_TIMEOUT_MS', { min: 1000, max: 120_000 }),
     apiV1Prefix,
+    apiV2Prefix: '/api/v2',
+    requestLogs: boolean(env.REQUEST_LOGS, appEnv.toLowerCase() === 'production'),
+    metricsToken,
+    notificationWebhookUrl,
+    notificationWebhookSecret,
+    deliveryEncryptionKey,
+    passwordResetUrl,
+    geofencesEnabled: boolean(env.GEOFENCES_ENABLED, false),
     databaseUrl,
     redisUrl,
     redisKeyPrefix,
