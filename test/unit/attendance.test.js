@@ -35,6 +35,12 @@ function fakePrisma(initialSession, initialPings = [], { failedCommits = 0 } = {
   };
   let revision = 0;
   let attempts = 0;
+  function matches(session, where) {
+    return session?.id && (where.userId === undefined || session.userId === where.userId)
+      && (where.status === undefined || session.status === where.status)
+      && (!where.punchedInAt || Object.entries(where.punchedInAt).every(([op, value]) =>
+        op === 'gte' ? session.punchedInAt >= value : op === 'lte' ? session.punchedInAt <= value : session.punchedInAt < value));
+  }
   function modelsFor(state) {
     return {
     locationSettings: {
@@ -46,12 +52,12 @@ function fakePrisma(initialSession, initialPings = [], { failedCommits = 0 } = {
       },
     },
     attendanceSession: {
+      async findMany({ where }) { return matches(state.session, where) ? [{ ...state.session }] : []; },
       async findUnique({ where }) {
         return state.session?.id === where.id ? { ...state.session } : null;
       },
       async findFirst({ where }) {
-        return state.session?.userId === where.userId && state.session.status === where.status
-          ? { ...state.session } : null;
+        return matches(state.session, where) ? { ...state.session } : null;
       },
       async create({ data }) {
         state.session = { ...data };
@@ -84,7 +90,7 @@ function fakePrisma(initialSession, initialPings = [], { failedCommits = 0 } = {
     },
     user: {
       async findUnique() {
-        return { id: initialSession.userId, employeeId: 'EMP1001', employeeName: 'Employee' };
+        return { id: initialSession.userId, employeeId: 'EMP1001', employeeName: 'Employee', locationTrackingEnabled: true };
       },
     },
     };
@@ -408,6 +414,65 @@ function activeSession() {
   };
 }
 
+test('a completed shift prevents a second punch-in on the same India day', async () => {
+  const initial = { ...activeSession(), status: 'punched_out', punchedOutAt: BASE_TIME };
+  const service = createAttendanceService({ prisma: fakePrisma(initial), config: config(),
+    now: () => new Date(BASE_TIME), imageStorage: { async deleteStoredFiles() {} } });
+  await assert.rejects(service.punchIn(initial.userId, {
+    ...point(), openingOdoKm: new Prisma.Decimal('100'), selfie: jpeg(), openingOdoImage: jpeg(),
+  }), { status: 409, code: 'ALREADY_PUNCHED_IN_TODAY' });
+});
+
+test('India midnight starts a new attendance day; 8 PM closes punch-in', async () => {
+  const initial = { ...activeSession(), status: 'punched_out', punchedInAt: new Date('2026-08-25T04:00Z') };
+  let clock = new Date('2026-08-25T14:30Z');
+  const prisma = fakePrisma(initial);
+  const service = createAttendanceService({ prisma, config: config(), now: () => new Date(clock),
+    imageStorage: { async deleteStoredFiles() {}, async saveAttendanceImage() { return 'fixture.jpg'; } } });
+  const input = { ...point(), capturedAt: null, openingOdoKm: new Prisma.Decimal('100'), selfie: jpeg(), openingOdoImage: jpeg() };
+  await assert.rejects(service.punchIn(initial.userId, input), { code: 'ALREADY_PUNCHED_IN_TODAY' });
+  clock = new Date('2026-08-26T14:30Z');
+  await assert.rejects(service.punchIn(initial.userId, input), { code: 'PUNCH_IN_CLOSED' });
+  clock = new Date('2026-08-26T18:30Z');
+  assert.equal((await service.punchIn(initial.userId, input)).session.punchedInAt.toISOString(), '2026-08-26T18:30:00.000Z');
+});
+
+test('automatic punch-out retries safely and rejects GPS after the cutoff while allowing offline in-shift samples', async () => {
+  const initial = activeSession();
+  const prisma = fakePrisma(initial, [], { failedCommits: 1 });
+  let clock = new Date('2026-08-25T14:29:59.999Z');
+  const published = [];
+  const service = createAttendanceService({ prisma, config: config(), now: () => new Date(clock),
+    imageStorage: {}, liveHub: { async publish(session) { published.push(session); } } });
+  assert.equal(await service.autoPunchOut(), 0);
+  clock = new Date('2026-08-25T14:30Z');
+  assert.equal(await service.autoPunchOut(), 1);
+  assert.equal(await service.autoPunchOut(), 0);
+  assert.equal(prisma.session.autoPunchedOut, true);
+  assert.equal(prisma.session.punchedOutAt.toISOString(), '2026-08-25T14:30:00.000Z');
+  for (const key of ['closingOdoKm', 'closingOdoImagePath', 'punchOutLatitude', 'punchOutLongitude']) assert.equal(prisma.session[key], null);
+  assert.equal(prisma.pings.length, 0);
+  assert.equal(published.length, 1);
+  assert.equal(await service.current(initial.userId), null);
+  const rejected = await service.locationPing(initial.userId, { sessionId: initial.id, ...point({ capturedAt: '2026-08-25T14:30:01Z' }) });
+  assert.equal(rejected.reason, 'SESSION_NOT_ACTIVE');
+  const accepted = await service.locationPing(initial.userId, { sessionId: initial.id, ...point({ capturedAt: '2026-08-25T14:29:59Z' }) });
+  assert.equal(accepted.accepted, true);
+  assert.equal(prisma.session.punchedOutAt.toISOString(), '2026-08-25T14:30:00.000Z');
+});
+
+test('a delayed sweep closes an old shift at its original cutoff, with no duplicate publications across replicas', async () => {
+  const initial = activeSession();
+  const prisma = fakePrisma(initial);
+  let published = 0;
+  const service = createAttendanceService({ prisma, config: config(), now: () => new Date('2026-08-28T04:00Z'),
+    imageStorage: {}, liveHub: { async publish() { published += 1; } } });
+  const results = await Promise.all([service.autoPunchOut(), service.autoPunchOut()]);
+  assert.equal(results.reduce((a, b) => a + b, 0), 1);
+  assert.equal(published, 1);
+  assert.equal(prisma.session.punchedOutAt.toISOString(), '2026-08-25T14:30:00.000Z');
+});
+
 function jpeg(marker = 1) {
   const buffer = Buffer.from([0xff, 0xd8, 0xff, marker]);
   return { buffer, size: buffer.length, mimetype: 'image/jpeg' };
@@ -473,7 +538,7 @@ test('exhausted serialization retries never publish rolled-back points', async (
 
 test('punch-in saves each owned image once across commit retries', async (t) => {
   const { uploadDir, settings, imageStorage } = await storageFixture(t);
-  const initial = { ...activeSession(), status: 'punched_out' };
+  const initial = { ...activeSession(), status: 'punched_out', punchedInAt: new Date('2026-08-24T09:00:00Z') };
   const prisma = fakePrisma(initial, [], { failedCommits: 1 });
   let saves = 0;
   let publications = 0;

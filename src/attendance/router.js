@@ -3,6 +3,7 @@ import multer from 'multer';
 
 import { ApiError, isMalformedMultipartError, sendSuccess, validationError } from '../common/api.js';
 import { createAttendanceService, toPunchOutData, toPunchSessionData } from './service.js';
+import { requiresOdometer, trackingEnabled } from '../security/tracking.js';
 import {
   parseLocationPingBatchRequest,
   parseLocationPingRequest,
@@ -68,9 +69,10 @@ export function createAttendanceRouter(dependencies) {
       { name: 'openingOdoImage', maxCount: 1 },
     ]),
     asyncRoute(async (req, res) => {
-      const request = parsePunchInRequest(req);
+      const request = parsePunchInRequest(req, { requiresOdometer: requiresOdometer(req.principal.user) });
       const result = await service.punchIn(principalUserId(req), request);
-      return sendSuccess(res, toPunchSessionData(result.session, result.locationMode), 201);
+      return sendSuccess(res, { ...toPunchSessionData(result.session, result.locationMode),
+        locationTrackingEnabled: result.locationTrackingEnabled, requiresOdometer: result.requiresOdometer }, 201);
     }),
   );
 
@@ -86,6 +88,8 @@ export function createAttendanceRouter(dependencies) {
         punchedIn: session !== null,
         session: session === null ? null : toPunchSessionData(session, locationMode),
         locationMode,
+        locationTrackingEnabled: trackingEnabled(req.principal.user),
+        requiresOdometer: requiresOdometer(req.principal.user, session),
       });
     }),
   );
@@ -121,7 +125,8 @@ export function createAttendanceRouter(dependencies) {
     fieldStaff,
     multipart([{ name: 'closingOdoImage', maxCount: 1 }]),
     asyncRoute(async (req, res) => {
-      const request = parsePunchOutRequest(req);
+      const currentSession = await service.current(principalUserId(req));
+      const request = parsePunchOutRequest(req, { requiresOdometer: requiresOdometer(req.principal.user, currentSession) });
       const session = await service.punchOut(principalUserId(req), request);
       if (!session.punchedOutAt) {
         throw new ApiError(500, 'INTERNAL_ERROR', 'Punch-out completed without a timestamp');

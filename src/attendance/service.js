@@ -2,11 +2,15 @@ import { randomUUID } from 'node:crypto';
 
 import { ApiError, validationError } from '../common/api.js';
 import { createImageStorage } from '../upload/image-storage.js';
+import { requiresOdometer, trackingAllowedAt, trackingEnabled, trackingUser } from '../security/tracking.js';
 import {
   decimalToFixed,
   parseOptionalPunchInstant,
   tryParseAwareInstant,
 } from './validation.js';
+
+import { attendanceDay } from './day.js';
+import { createAutoPunchOut } from './auto-punch-out.js';
 
 const SETTINGS_KEY = 'default';
 const MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1_000;
@@ -115,8 +119,11 @@ export function createAttendanceService({
   modeCache = createLocationModeCache(),
   now = () => new Date(),
   createId = randomUUID,
+  onAcceptedPoint = async () => {},
 }) {
   if (!prisma) throw new TypeError('prisma is required');
+
+  const autoPunchOut = createAutoPunchOut({ prisma, liveHub, now });
 
   async function resolveLocationMode(db = prisma) {
     const cached = modeCache.get();
@@ -128,6 +135,7 @@ export function createAttendanceService({
   }
 
   async function current(userId) {
+    await autoPunchOut(userId);
     return prisma.attendanceSession.findFirst({
       where: { userId, status: 'punched_in' },
       orderBy: { punchedInAt: 'desc' },
@@ -140,14 +148,16 @@ export function createAttendanceService({
   }
 
   async function punchIn(userId, request) {
+    await autoPunchOut(userId);
     const sessionId = createId();
     const saved = [];
     let selfiePath;
     let openingOdoImagePath;
     try {
-      return await serializable(prisma, async (tx, afterCommit) => {
-        const user = await tx.user.findUnique({ where: { id: userId } });
-        if (!user) throw new ApiError(401, 'UNAUTHORIZED', 'User account is unavailable');
+      const result = await serializable(prisma, async (tx, afterCommit) => {
+        const user = await trackingUser(tx, userId);
+        const tracked = trackingEnabled(user);
+        if (tracked && (request.openingOdoKm == null || !request.openingOdoImage)) throw validationError();
 
         const existing = await tx.attendanceSession.findFirst({
           where: { userId, status: 'punched_in' },
@@ -163,6 +173,14 @@ export function createAttendanceService({
 
         const locationMode = await resolveLocationMode(tx);
         const serverNow = now();
+        const day = attendanceDay(serverNow);
+        if (await tx.attendanceSession.findFirst({
+          where: { userId, punchedInAt: { gte: day.start, lt: day.end } },
+          select: { id: true },
+        })) throw new ApiError(409, 'ALREADY_PUNCHED_IN_TODAY', 'You can only punch in once per day');
+        if (serverNow >= day.cutoff) {
+          throw new ApiError(409, 'PUNCH_IN_CLOSED', 'Punch-in is closed after 8:00 PM');
+        }
         const capturedAt = parseOptionalPunchInstant(request.capturedAt, serverNow);
         if (isStale(capturedAt, serverNow)) {
           throw new ApiError(400, 'STALE_TIMESTAMP', 'capturedAt is too far from server time');
@@ -174,7 +192,7 @@ export function createAttendanceService({
           );
           saved.push(selfiePath);
         }
-        if (!openingOdoImagePath) {
+        if (tracked && !openingOdoImagePath) {
           openingOdoImagePath = await imageStorage.saveAttendanceImage(
             request.openingOdoImage, userId, sessionId, 'opening_odo',
           );
@@ -186,22 +204,22 @@ export function createAttendanceService({
             id: sessionId,
             userId,
             status: 'punched_in',
-            openingOdoKm: request.openingOdoKm,
+            openingOdoKm: tracked ? request.openingOdoKm : null,
             openingSelfiePath: selfiePath,
-            openingOdoImagePath,
+            openingOdoImagePath: tracked ? openingOdoImagePath : null,
             punchInLatitude: request.latitude,
             punchInLongitude: request.longitude,
             punchInAccuracy: request.accuracy,
             punchedInAt: serverNow,
-            pingCount: 1,
-            lastKnownLatitude: request.latitude,
-            lastKnownLongitude: request.longitude,
-            lastKnownAccuracy: request.accuracy,
-            lastKnownCapturedAt: capturedAt,
+            pingCount: tracked ? 1 : 0,
+            lastKnownLatitude: tracked ? request.latitude : null,
+            lastKnownLongitude: tracked ? request.longitude : null,
+            lastKnownAccuracy: tracked ? request.accuracy : null,
+            lastKnownCapturedAt: tracked ? capturedAt : null,
             updatedAt: serverNow,
           },
         });
-        await tx.locationPing.create({
+        if (tracked) await tx.locationPing.create({
           data: {
             attendanceSessionId: sessionId,
             latitude: request.latitude,
@@ -210,9 +228,12 @@ export function createAttendanceService({
             capturedAt,
           },
         });
-        afterCommit(() => publish(session, userId, prisma));
-        return { session, locationMode };
+        if (tracked) afterCommit(() => publish(session, userId, prisma));
+        return { session, locationMode, locationTrackingEnabled: tracked, requiresOdometer: tracked };
       });
+      await imageStorage.deleteStoredFiles(...saved.filter((path) =>
+        path !== result.session.openingSelfiePath && path !== result.session.openingOdoImagePath));
+      return result;
     } catch (error) {
       await imageStorage.deleteStoredFiles(...saved);
       if (isPrismaCode(error, 'P2002')) {
@@ -233,13 +254,17 @@ export function createAttendanceService({
     });
   }
 
-  async function evaluatePoint(tx, session, point, locationMode, serverNow) {
+  async function evaluatePoint(tx, session, point, locationMode, serverNow, user) {
+    if (!trackingEnabled(user)) return { accepted: false, reason: 'LOCATION_TRACKING_DISABLED' };
     const duplicate = await findDuplicate(tx, session.id, point.clientEventId);
     if (duplicate) {
       return { accepted: true, duplicate: true, reason: 'DUPLICATE', pingId: duplicate.id };
     }
 
     const capturedAt = tryParseAwareInstant(point.capturedAt);
+    if (capturedAt && !trackingAllowedAt(user, capturedAt)) {
+      return { accepted: false, reason: 'LOCATION_TRACKING_DISABLED' };
+    }
     const punchedInAt = instant(session.punchedInAt);
     const punchedOutAt = instant(session.punchedOutAt);
     const inClosedWindow = session.status === 'punched_out'
@@ -324,22 +349,26 @@ export function createAttendanceService({
         updatedAt: now(),
       },
     });
+    await onAcceptedPoint(tx, updated, { ...point, capturedAt });
     return { ping, session: updated };
   }
 
   async function locationPing(userId, request) {
+    await autoPunchOut(userId);
     const locationMode = await resolveLocationMode();
     return serializable(prisma, async (tx, afterCommit) => {
       let session = await tx.attendanceSession.findUnique({ where: { id: request.sessionId } });
       if (!session || session.userId !== userId) {
         return { accepted: false, reason: 'SESSION_NOT_FOUND', pingId: null, locationMode };
       }
+      const user = await trackingUser(tx, userId);
       const outcome = await evaluatePoint(
         tx,
         session,
         request,
         locationMode,
         now(),
+        user,
       );
       if (!outcome.accepted) {
         return { accepted: false, reason: outcome.reason, pingId: null, locationMode };
@@ -369,6 +398,7 @@ export function createAttendanceService({
   }
 
   async function locationPingBatch(userId, request) {
+    await autoPunchOut(userId);
     if (request.pings.length > config.locationPingBatchMax) throw validationError();
     const locationMode = await resolveLocationMode();
     return serializable(prisma, async (tx, afterCommit) => {
@@ -376,6 +406,8 @@ export function createAttendanceService({
       if (!session || session.userId !== userId) {
         return rejectAll(request.pings.length, 'SESSION_NOT_FOUND', locationMode);
       }
+      const user = await trackingUser(tx, userId);
+      if (!trackingEnabled(user)) return rejectAll(request.pings.length, 'LOCATION_TRACKING_DISABLED', locationMode);
       const serverNow = now();
       const ordered = request.pings
         .map((point, index) => ({ point, index, parsed: tryParseAwareInstant(point.capturedAt) }))
@@ -393,6 +425,7 @@ export function createAttendanceService({
           item.point,
           locationMode,
           serverNow,
+          user,
         );
         if (!outcome.accepted) {
           byIndex.set(item.index, {
@@ -436,13 +469,13 @@ export function createAttendanceService({
   }
 
   async function punchOut(userId, request) {
+    await autoPunchOut(userId);
     // Reuse this operation's image across retries, never another caller's path.
     const savedBySession = new Map();
     let result;
     try {
       result = await serializable(prisma, async (tx, afterCommit) => {
-        const user = await tx.user.findUnique({ where: { id: userId } });
-        if (!user) throw new ApiError(401, 'UNAUTHORIZED', 'User account is unavailable');
+        const user = await trackingUser(tx, userId);
         let session = await tx.attendanceSession.findFirst({
           where: { userId, status: 'punched_in' },
           orderBy: { punchedInAt: 'desc' },
@@ -450,7 +483,9 @@ export function createAttendanceService({
         if (!session) {
           throw new ApiError(409, 'NOT_PUNCHED_IN', 'No active punch-in session to close');
         }
-        if (request.closingOdoKm.lessThan(session.openingOdoKm)) {
+        const odometerRequired = requiresOdometer(user, session);
+        if (odometerRequired && (request.closingOdoKm == null || !request.closingOdoImage)) throw validationError();
+        if (odometerRequired && request.closingOdoKm.lessThan(session.openingOdoKm)) {
           throw new ApiError(
             400,
             'INVALID_ODO_READING',
@@ -464,15 +499,15 @@ export function createAttendanceService({
           throw new ApiError(400, 'STALE_TIMESTAMP', 'capturedAt is too far from server time');
         }
 
-        let closingOdoImagePath = savedBySession.get(session.id);
-        if (!closingOdoImagePath) {
+        let closingOdoImagePath = odometerRequired ? savedBySession.get(session.id) : null;
+        if (odometerRequired && !closingOdoImagePath) {
           closingOdoImagePath = await imageStorage.saveAttendanceImage(
             request.closingOdoImage, userId, session.id, 'closing_odo',
           );
           savedBySession.set(session.id, closingOdoImagePath);
         }
         const locationMode = await resolveLocationMode(tx);
-        const appendFinalPing = locationMode === 'continuous'
+        const appendFinalPing = trackingEnabled(user) && locationMode === 'continuous'
           && session.pingCount < config.locationPingMaxPerSession;
         if (appendFinalPing) {
           await tx.locationPing.create({
@@ -490,7 +525,7 @@ export function createAttendanceService({
           where: { id: session.id },
           data: {
             status: 'punched_out',
-            closingOdoKm: request.closingOdoKm,
+            closingOdoKm: odometerRequired ? request.closingOdoKm : null,
             closingOdoImagePath,
             punchOutLatitude: request.latitude,
             punchOutLongitude: request.longitude,
@@ -503,7 +538,7 @@ export function createAttendanceService({
             updatedAt: serverNow,
           },
         });
-        afterCommit(() => publish(session, userId, prisma));
+        if (trackingEnabled(user)) afterCommit(() => publish(session, userId, prisma));
         return session;
       });
     } catch (error) {
@@ -533,6 +568,7 @@ export function createAttendanceService({
   }
 
   return Object.freeze({
+    autoPunchOut,
     current,
     locationPing,
     locationPingBatch,

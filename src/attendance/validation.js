@@ -93,21 +93,21 @@ function baseMultipart(body) {
   };
 }
 
-export function parsePunchInRequest(req) {
+export function parsePunchInRequest(req, { requiresOdometer = true } = {}) {
   const common = baseMultipart(req.body);
   return {
     selfie: multipartFile(req.files, 'selfie'),
-    openingOdoImage: multipartFile(req.files, 'openingOdoImage'),
-    openingOdoKm: decimalOdometer(req.body?.openingOdoKm),
+    openingOdoImage: requiresOdometer ? multipartFile(req.files, 'openingOdoImage') : null,
+    openingOdoKm: requiresOdometer ? decimalOdometer(req.body?.openingOdoKm) : null,
     ...common,
   };
 }
 
-export function parsePunchOutRequest(req) {
+export function parsePunchOutRequest(req, { requiresOdometer = true } = {}) {
   const common = baseMultipart(req.body);
   return {
-    closingOdoImage: multipartFile(req.files, 'closingOdoImage'),
-    closingOdoKm: decimalOdometer(req.body?.closingOdoKm),
+    closingOdoImage: requiresOdometer ? multipartFile(req.files, 'closingOdoImage') : null,
+    closingOdoKm: requiresOdometer ? decimalOdometer(req.body?.closingOdoKm) : null,
     ...common,
   };
 }
