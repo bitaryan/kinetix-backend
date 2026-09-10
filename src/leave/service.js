@@ -3,7 +3,7 @@ import { serializable } from '../db/transaction.js';
 
 const BLOCKING_STATUSES = ['PENDING', 'APPROVED'];
 
-export function createLeaveService({ prisma }) {
+export function createLeaveService({ prisma, events = async () => {} }) {
   async function list(user, { page, limit, status }) {
     const where = {
       ...(user.role === 'EMPLOYEE' ? { userId: user.id } : {}),
@@ -49,13 +49,16 @@ export function createLeaveService({ prisma }) {
           'A leave application already exists for overlapping dates',
         );
       }
-      return tx.leave.create({
+      const leave = await tx.leave.create({
         data: { userId, startDate, endDate, reason, status: 'PENDING' },
       });
+      await events(tx, userId, leave);
+      return leave;
     }, { retries: 4 });
   }
 
   async function updateStatus(actor, leaveId, { status, rejectionReason }) {
+    if (actor.role !== 'ADMIN') throw new ApiError(403, 'FORBIDDEN', 'You do not have permission for this action');
     if (status === 'REJECTED' && rejectionReason === null) throw validationError();
     if (status === 'APPROVED' && rejectionReason !== null) throw validationError();
 
@@ -76,7 +79,7 @@ export function createLeaveService({ prisma }) {
           'Only pending leave applications can be updated',
         );
       }
-      return tx.leave.update({
+      const leave = await tx.leave.update({
         where: { id: leaveId },
         data: {
           status,
@@ -85,6 +88,8 @@ export function createLeaveService({ prisma }) {
           updatedAt: new Date(),
         },
       });
+      await events(tx, actor.id, leave, existing.status);
+      return leave;
     }, { retries: 4 });
   }
 

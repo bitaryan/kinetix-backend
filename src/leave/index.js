@@ -65,9 +65,9 @@ function leaveDetail(leave) {
   };
 }
 
-export function createLeaveRouter({ prisma, auth }) {
+export function createLeaveRouter({ prisma, auth, events }) {
   const router = express.Router();
-  const service = createLeaveService({ prisma });
+  const service = createLeaveService({ prisma, events });
   router.use(auth.authenticate);
 
   router.get('/', auth.requireRoles('EMPLOYEE', 'MANAGER', 'ADMIN'), async (req, res) => {
@@ -109,7 +109,7 @@ export function createLeaveRouter({ prisma, auth }) {
 
   router.patch(
     '/:leaveId/status',
-    auth.requireRoles('MANAGER', 'ADMIN'),
+    auth.requireRoles('ADMIN'),
     async (req, res) => {
       const leaveId = uuidValue(req.params.leaveId);
       const payload = requireObject(req.body);

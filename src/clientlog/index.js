@@ -178,7 +178,7 @@ export function createClientLogRouter({ prisma, config, auth, imageStorage }) {
     },
   );
 
-  router.delete('/:logId', auth.requireRoles('MANAGER', 'ADMIN'), async (req, res) => {
+  router.delete('/:logId', auth.requireRoles('ADMIN'), async (req, res) => {
     const id = uuidValue(req.params.logId);
     await service.remove(req.principal.user, id);
     return sendSuccess(res, { message: 'Client log deleted successfully' });

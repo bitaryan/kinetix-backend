@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Prisma } from '@prisma/client';
 
-import { notFound, validationError } from '../common/api.js';
+import { ApiError, notFound, validationError } from '../common/api.js';
 import { numberValue } from '../common/validation.js';
 
 function coordinate(value) {
@@ -75,10 +75,8 @@ export function createClientLogService({ prisma, images }) {
   }
 
   async function remove(actor, id) {
-    const where = {
-      id,
-      ...(actor.role === 'ADMIN' ? {} : { userId: actor.id }),
-    };
+    if (actor.role !== 'ADMIN') throw new ApiError(403, 'FORBIDDEN', 'You do not have permission for this action');
+    const where = { id };
     const log = await prisma.clientLog.findFirst({ where });
     if (!log) throw notFound('Client log not found');
     const removed = await prisma.clientLog.deleteMany({ where });
