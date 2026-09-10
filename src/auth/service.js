@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import argon2 from 'argon2';
 
 import { ApiError, validationError } from '../common/api.js';
-import { EMAIL_PATTERN } from '../common/validation.js';
+import { booleanValue, EMAIL_PATTERN } from '../common/validation.js';
 import { serializable } from '../db/transaction.js';
 
 const USER_ROLES = ['ADMIN', 'MANAGER', 'EMPLOYEE'];
@@ -89,6 +89,7 @@ export function validateCreateUserRequest(input) {
     email: rawEmail.trim().toLowerCase(),
     password,
     role,
+    locationTrackingEnabled: input.locationTrackingEnabled === undefined ? false : booleanValue(input.locationTrackingEnabled),
   };
 }
 
@@ -100,6 +101,7 @@ export function userProfile(user) {
     email: user.email,
     role: user.role,
     isActive: user.isActive,
+    locationTrackingEnabled: user.locationTrackingEnabled === true,
     createdAt: user.createdAt,
   };
 }
@@ -157,6 +159,7 @@ export function createAuthService({ prisma, config, jwtService }) {
             passwordHash,
             role: payload.role,
             isActive: true,
+            locationTrackingEnabled: payload.locationTrackingEnabled,
           },
         });
         return { user };
