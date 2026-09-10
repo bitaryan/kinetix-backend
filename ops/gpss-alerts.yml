@@ -1,0 +1,40 @@
+groups:
+  - name: gpss
+    rules:
+      - alert: GPSSUnavailable
+        expr: up{job="gpss"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: GPSS metrics target is unavailable
+          description: Check instance health, /readyz, network access and the metrics credential.
+      - alert: GPSSServerErrors
+        expr: sum(rate(gpss_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(gpss_http_requests_total[5m])), 0.01) > 0.02
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: GPSS server error ratio exceeds two percent
+      - alert: GPSSSlowRequests
+        expr: histogram_quantile(0.95, sum by (le) (rate(gpss_http_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: GPSS p95 response duration exceeds two seconds
+      - alert: GPSSRateLimitPressure
+        expr: sum(rate(gpss_http_requests_total{status="429"}[5m])) > 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: GPSS rate limiting exceeds one rejected request per second
+      - alert: GPSSDeliveryBacklog
+        expr: max(gpss_delivery_oldest_seconds) > 300
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: A GPSS notification has been queued for more than five minutes
+      - alert: GPSSDeliveryFailed
+        expr: max(gpss_delivery_failed) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: GPSS has terminally failed notification deliveries

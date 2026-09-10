@@ -1,0 +1,30 @@
+rule_files:
+  - gpss-alerts.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="gpss",instance="api:8080"}'
+        values: '0 0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: GPSSUnavailable
+        exp_alerts:
+          - exp_labels: {job: gpss, instance: 'api:8080', severity: critical}
+            exp_annotations:
+              summary: GPSS metrics target is unavailable
+              description: Check instance health, /readyz, network access and the metrics credential.
+      - eval_time: 4m
+        alertname: GPSSUnavailable
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'gpss_delivery_oldest_seconds{job="gpss",instance="api:8080"}'
+        values: '400x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: GPSSDeliveryBacklog
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: A GPSS notification has been queued for more than five minutes
