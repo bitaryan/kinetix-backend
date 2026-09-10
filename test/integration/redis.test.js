@@ -39,12 +39,12 @@ if (!redisUrl) {
     await assert.rejects(two.enforceLocationPing(req, 'different-employee'), { status: 429 });
     assert.equal(await first.execute((client) => client.zCard(`${config.redisKeyPrefix}:rate:locping:user:different-employee`)), 0);
 
-    const user = { id: 'employee', employeeId: 'EMP01', employeeName: 'Employee' };
+    const user = { id: 'employee', employeeId: 'EMP01', employeeName: 'Employee', locationTrackingEnabled: true, isActive: true };
     const session = {
       id: randomUUID(), status: 'punched_in', lastKnownLatitude: 28, lastKnownLongitude: 77,
       lastKnownAccuracy: 10, lastKnownCapturedAt: new Date(), user,
     };
-    const prisma = { user: { async findUnique() { return user; } }, attendanceSession: { async findMany() { return [session]; } } };
+    const prisma = { user: { async findUnique() { return user; }, async findMany() { return [user]; } }, attendanceSession: { async findMany() { return [session]; } } };
     const localHub = createLiveLocationHub({ prisma, config, redis: first });
     const remoteHub = createLiveLocationHub({ prisma, config, redis: second });
     t.after(() => { localHub.close(); remoteHub.close(); });
@@ -60,6 +60,18 @@ if (!redisUrl) {
     assert.equal(remote.length, 1);
     assert.deepEqual(local[0], remote[0]);
     assert.deepEqual(await remoteHub.snapshot(), remote);
+    const previousLocation = remote[0];
+    user.locationTrackingEnabled = false;
+    const removal = new Promise((resolve) => { received = resolve; });
+    await localHub.removeUser(user.id);
+    await removal;
+    assert.equal(remote.at(-1).status, 'tracking_disabled');
+    assert.equal(remote.at(-1).latitude, null);
+    assert.deepEqual(await remoteHub.filterEvents([previousLocation, remote.at(-1)]), [remote.at(-1)]);
+    assert.deepEqual(await remoteHub.snapshot(), []);
+    user.locationTrackingEnabled = true;
+    user.locationTrackingSince = new Date(session.lastKnownCapturedAt.getTime() + 1);
+    assert.deepEqual(await remoteHub.filterEvents([previousLocation, remote.at(-1)]), []);
     await first.check();
     first.close();
     assert.equal(first.isReady(), false);

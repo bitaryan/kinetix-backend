@@ -82,14 +82,14 @@ test('raw WebSocket endpoint accepts STOMP auth and publishes topic messages', a
   ws.close();
 });
 
-async function socketFixture(t, { limits, authenticateToken, config: socketConfig, origin } = {}) {
+async function socketFixture(t, { limits, authenticateToken, config: socketConfig, origin, filterEvents } = {}) {
   const server = http.createServer();
   const listeners = new Set();
   const bridge = attachLiveWebSocket({
     server,
     limits,
     config: socketConfig,
-    liveHub: { subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); } },
+    liveHub: { filterEvents, subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); } },
     auth: { authenticateToken: authenticateToken ?? (async () => ({ user: { role: 'MANAGER' } })) },
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -177,6 +177,27 @@ async function subscribe(ws) {
   ws.send('SUBSCRIBE\nid:live\ndestination:/topic/live-locations\nreceipt:ready\n\n\0');
   assert.match(await message, /^RECEIPT/);
 }
+
+test('socket delivery filters queued coordinates and sends the tracking removal event', { timeout: 2000 }, async (t) => {
+  const { ws, listeners } = await socketFixture(t, {
+    async filterEvents(events) {
+      assert.equal(events.length, 2);
+      return events.filter((event) => event.status === 'tracking_disabled');
+    },
+  });
+  await subscribe(ws);
+  const frames = [];
+  ws.on('message', (frame) => frames.push(frame.toString()));
+  const message = nextMessage(ws);
+  for (const listener of listeners) {
+    listener({ userId: 'user', latitude: 28.6, longitude: 77.2, status: 'punched_in' });
+    listener({ userId: 'user', latitude: null, longitude: null, status: 'tracking_disabled' });
+  }
+  const frame = await message;
+  assert.match(frame, /tracking_disabled/);
+  assert.ok(frames.every((body) => !body.includes('28.6')));
+  ws.close();
+});
 
 for (const change of ['revoked', 'expired', 'role changed']) {
   test(`live broadcasts revalidate credentials when ${change}`, { timeout: 2000 }, async (t) => {

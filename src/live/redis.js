@@ -44,7 +44,12 @@ export function createRedisInfrastructure(config) {
     try {
       const event = JSON.parse(raw);
       if (event.source === instanceId || !event.data || typeof event.data !== 'object'
-          || typeof event.data.sessionId !== 'string') return;
+          || typeof event.data.userId !== 'string') return;
+      const removal = event.data.status === 'tracking_disabled'
+        && event.data.locationTrackingEnabled === false
+        && event.data.latitude === null && event.data.longitude === null
+        && event.data.accuracy === null && event.data.capturedAt === null;
+      if (!removal && (event.data.status === 'tracking_disabled' || typeof event.data.sessionId !== 'string')) return;
       for (const listener of listeners) listener(event.data);
     } catch {
       console.warn('Ignored invalid shared live-location update');

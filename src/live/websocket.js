@@ -103,6 +103,7 @@ export function attachLiveWebSocket({
   config = {},
   path = '/ws',
   limits: overrides = {},
+  telemetry,
 }) {
   if (!server?.on) throw new TypeError('HTTP server is required');
   if (typeof auth?.authenticateToken !== 'function') {
@@ -176,11 +177,16 @@ export function attachLiveWebSocket({
         const batch = state.output;
         state.output = [];
         const principal = await authorize(ws);
+        const allowed = typeof liveHub.filterEvents === 'function'
+          ? (await liveHub.filterEvents(batch.map((body) => JSON.parse(body)))).map((event) => JSON.stringify(event))
+          : batch;
         if (state.stopped || ws.readyState !== WebSocket.OPEN) return;
         state.principal = principal;
         for (const body of batch) {
           state.outputBytes -= Buffer.byteLength(body);
           state.outputFrames -= 1;
+        }
+        for (const body of allowed) {
           for (const [subscription, destination] of state.subscriptions) {
             if (destination !== LIVE_LOCATIONS_TOPIC) continue;
             send(ws, stompFrame('MESSAGE', {
@@ -277,6 +283,7 @@ export function attachLiveWebSocket({
   }
 
   wss.on('connection', (ws) => {
+    telemetry?.socketOpened();
     const state = {
       connected: false,
       stopped: false,
@@ -314,6 +321,7 @@ export function attachLiveWebSocket({
 
     function fail(error) {
       if (state.stopped) return;
+      telemetry?.socketFailed();
       stop();
       // A peer need not read the ERROR frame or complete the close handshake.
       state.closeTimer = setTimeout(() => ws.terminate(), CLOSE_TIMEOUT_MS);
@@ -327,12 +335,14 @@ export function attachLiveWebSocket({
     }, limits.connectTimeoutMs);
     state.connectTimer.unref();
     ws.on('error', () => {
+      if (!state.stopped) telemetry?.socketFailed();
       // Protocol errors (including invalid UTF-8 and maxPayload) are emitted by
       // ws, not by our message handler. Never let an untrusted frame exit Node.
       stop();
       ws.terminate();
     });
     ws.on('close', () => {
+      telemetry?.socketClosed();
       stop();
       clearTimeout(state.closeTimer);
     });
